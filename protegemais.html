@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Rastreamento GPS</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <style>
+    body, html {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      font-family: Arial, sans-serif;
+      display: flex;
+      flex-direction: column;
+    }
+    #map {
+      flex: 1;
+      width: 100%;
+    }
+    #sidebar {
+      width: 100%;
+      background: #f7f7f7;
+      padding: 10px;
+      box-sizing: border-box;
+    }
+    .info {
+      margin-bottom: 10px;
+      font-size: 16px;
+    }
+    .rua-item {
+      font-size: 14px;
+      margin-bottom: 5px;
+      border-bottom: 1px solid #ccc;
+      padding-bottom: 5px;
+    }
+    .rua-item strong {
+      color: #007bff;
+    }
+    #buttons {
+      margin-bottom: 10px;
+      display: flex;
+      gap: 10px;
+    }
+    #buttons button {
+      flex: 1;
+      padding: 10px;
+      background-color: #007bff;
+      color: white;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    #buttons button:last-child {
+      background-color: #dc3545;
+    }
+
+    @media (min-width: 768px) {
+      body {
+        flex-direction: row;
+      }
+      #map {
+        width: 75%;
+      }
+      #sidebar {
+        width: 25%;
+        height: 100vh;
+        overflow-y: auto;
+        border-left: 1px solid #ccc;
+      }
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<div id="sidebar">
+  <div id="buttons">
+    <button onclick="salvarPDF()">Salvar PDF</button>
+    <button onclick="limparPercurso()">Limpar</button>
+  </div>
+  <div class="info" id="status">Status: Conectando...</div>
+  <div class="info" id="rua">Rua: ---</div>
+  <div class="info" id="velocidade">Velocidade: --- km/h</div>
+  <hr>
+  <h3>Velocidade maxima por rua</h3>
+  <div id="lista-ruas"></div>
+</div>
+
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script>
+  const SERVER_IP = "45.181.56.47";
+  const SERVER_PORT = "8080";
+  const AUTH_TOKEN = "lFB0OVz9myOpC5kTOw4nDcnxdjdx-TCY";
+  const PIN = "V3";
+  const MAX_POINTS = 500;
+
+  let map = L.map('map').setView([-23.5505, -46.6333], 17);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  const carIcon = L.icon({
+    iconUrl: 'https://grupoprotegemais.com.br/wp-content/uploads/2025/03/logo.webp',
+    iconSize: [40, 40],
+    iconAnchor: [18, 18]
+  });
+
+  let marker = L.marker([-23.5505, -46.6333], { icon: carIcon }).addTo(map);
+  let polyline = L.polyline([], { color: 'blue', weight: 4 }).addTo(map);
+  let route = [];
+
+  let lastLat = null;
+  let lastLng = null;
+
+  const statusElement = document.getElementById('status');
+  const ruaElement = document.getElementById('rua');
+  const velocidadeElement = document.getElementById('velocidade');
+  const listaRuas = document.getElementById('lista-ruas');
+
+  let maxSpeeds = {};
+
+  let follow = true;
+  let lastInteractionTime = Date.now();
+
+  map.on('movestart', () => {
+    follow = false;
+    lastInteractionTime = Date.now();
+  });
+
+  function atualizarLista() {
+    listaRuas.innerHTML = '';
+    for (const rua in maxSpeeds) {
+      const div = document.createElement('div');
+      div.className = 'rua-item';
+      div.innerHTML = `<strong>${rua}</strong><br>Velocidade maxima: ${maxSpeeds[rua].toFixed(1)} km/h`;
+      listaRuas.appendChild(div);
+    }
+  }
+
+  async function fetchData() {
+    try {
+      statusElement.textContent = "Status: Carregando...";
+      const response = await fetch(`http://${SERVER_IP}:${SERVER_PORT}/${AUTH_TOKEN}/get/${PIN}`);
+      const data = await response.json();
+
+      if (data && data[0]) {
+        let parts = data[0].split(',');
+        if (parts.length >= 4) {
+          let lat = parseFloat(parts[0]);
+          let lng = parseFloat(parts[1]);
+          let rua = parts[2].trim();
+          let velocidade = parseFloat(parts[3]);
+
+          if (lat === lastLat && lng === lastLng) {
+            statusElement.textContent = "Status: Conectado";
+            return;
+          }
+          lastLat = lat;
+          lastLng = lng;
+
+          const newPoint = [lat, lng];
+          route.push(newPoint);
+          if (route.length > MAX_POINTS) route.shift();
+          polyline.setLatLngs(route);
+          marker.setLatLng(newPoint);
+
+          if (follow) {
+            map.setView(newPoint, 17);
+          } else if (Date.now() - lastInteractionTime > 20000) {
+            follow = true;
+            map.setView(newPoint, 17);
+          }
+
+          ruaElement.textContent = `Rua: ${rua || "---"}`;
+          velocidadeElement.textContent = `Velocidade: ${velocidade.toFixed(1)} km/h`;
+
+          if (rua !== "") {
+            if (!maxSpeeds[rua] || velocidade > maxSpeeds[rua]) {
+              maxSpeeds[rua] = velocidade;
+              atualizarLista();
+            }
+          }
+          statusElement.textContent = "Status: Conectado";
+        }
+      }
+    } catch (error) {
+      console.error("Erro ao buscar dados:", error);
+      statusElement.textContent = "Status: Desconectado";
+    }
+  }
+
+  setInterval(fetchData, 1000);
+
+  function salvarPDF() {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text("Relatorio de velocidade por rua", 10, 20);
+    let y = 30;
+    for (const rua in maxSpeeds) {
+      doc.setFontSize(12);
+      doc.text(`${rua}: ${maxSpeeds[rua].toFixed(1)} km/h`, 10, y);
+      y += 10;
+      if (y > 280) {
+        doc.addPage();
+        y = 20;
+      }
+    }
+    doc.save('relatorio_percurso.pdf');
+  }
+
+  function limparPercurso() {
+    if (confirm("Tem certeza que deseja limpar o percurso?")) {
+      route = [];
+      polyline.setLatLngs(route);
+      maxSpeeds = {};
+      atualizarLista();
+      ruaElement.textContent = "Rua: ---";
+      velocidadeElement.textContent = "Velocidade: --- km/h";
+    }
+  }
+</script>
+
+</body>
+</html>
