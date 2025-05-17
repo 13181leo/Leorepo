@@ -206,13 +206,16 @@
     }
 
     function buscarRegistros() {
-      fetch(`http://${ipServidor}:${porta}/${token}/get/V4?token=${token}`)
-        .then(res => res.json())
-        .then(data => {
-          const registros = JSON.parse(Array.isArray(data) ? data[0] : data.value);
-          alert("Trilha: " + JSON.stringify(registros.trilha) + "\nRuas: " + JSON.stringify(registros.velocidades));
-        });
-    }
+      fetch(`http://${ipServidor}:${porta}/${token}/update/V3?value=${encodeURIComponent(v3)}`)
+  .then(res => {
+    if (!res.ok) throw new Error("Erro na resposta");
+    console.log("Enviado para V3:", v3);
+  })
+  .catch(err => {
+    console.error("Erro ao enviar para V3:", err);
+    alert("Erro ao enviar localização ao Blynk");
+  });
+
 
     function limparPercurso() {
       trilhaCelular = [];
