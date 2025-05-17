@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -120,8 +119,8 @@
 
   <script>
     const ipServidor = '45.181.56.47';
-    const porta = '80';
-    let token = 'lFB0OVz9myOpC5kTOw4nDcnxdjdx-TCY';
+    const porta = '8080';
+    let token = '';
     let mapa, marcadorCelular = null, linhaCelular = null;
     let trilhaCelular = [], ultimaPosicao = null;
 
@@ -189,8 +188,7 @@
         }
 
         const v3 = `${lat.toFixed(6)},${lon.toFixed(6)},${rua},${velocidade.toFixed(1)}`;
-        fetch(`https://${ipServidor}:${porta}/${token}/update/V3?value=${encodeURIComponent(v3)}`)
-
+        fetch(`http://${ipServidor}:${porta}/${token}/update/V3?value=${encodeURIComponent(v3)}`)
           .then(() => console.log("Enviado para V3:", v3))
           .catch(() => console.warn("Erro ao enviar para V3"));
 
@@ -235,4 +233,3 @@
 </body>
 </html>
 
-    
