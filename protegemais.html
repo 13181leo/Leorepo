@@ -1,228 +1,126 @@
 <!DOCTYPE html>
-<html lang="pt-BR">
+<html lang="pt-br">
 <head>
   <meta charset="UTF-8">
-  <title>Rastreamento GPS</title>
+  <title>Controle de Acesso</title>
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-  <style>
-    body, html {
-      margin: 0;
-      padding: 0;
-      height: 100%;
-      font-family: Arial, sans-serif;
-      display: flex;
-      flex-direction: column;
-    }
-    #map {
-      flex: 1;
-      width: 100%;
-    }
-    #sidebar {
-      width: 100%;
-      background: #f7f7f7;
-      padding: 10px;
-      box-sizing: border-box;
-    }
-    .info {
-      margin-bottom: 10px;
-      font-size: 16px;
-    }
-    .rua-item {
-      font-size: 14px;
-      margin-bottom: 5px;
-      border-bottom: 1px solid #ccc;
-      padding-bottom: 5px;
-    }
-    .rua-item strong {
-      color: #007bff;
-    }
-    #buttons {
-      margin-bottom: 10px;
-      display: flex;
-      gap: 10px;
-    }
-    #buttons button {
-      flex: 1;
-      padding: 10px;
-      background-color: #007bff;
-      color: white;
-      border: none;
-      border-radius: 5px;
-      cursor: pointer;
-    }
-    #buttons button:last-child {
-      background-color: #dc3545;
-    }
 
-    @media (min-width: 768px) {
-      body {
-        flex-direction: row;
-      }
-      #map {
-        width: 75%;
-      }
-      #sidebar {
-        width: 25%;
-        height: 100vh;
-        overflow-y: auto;
-        border-left: 1px solid #ccc;
-      }
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+  <style>
+    body {
+      background: #111;
+      color: #fff;
+      font-family: Arial;
+      text-align: center;
+    }
+    video {
+      width: 90%;
+      max-width: 400px;
+      border-radius: 10px;
+      border: 2px solid #00c853;
+    }
+    #status {
+      font-size: 22px;
+      margin-top: 10px;
+      font-weight: bold;
+    }
+    #info {
+      font-size: 16px;
+      opacity: 0.8;
     }
   </style>
 </head>
+
 <body>
 
-<div id="map"></div>
+<h2>✋ Controle de Acesso</h2>
+<p>Mão aberta = LIGA | Mão fechada = DESLIGA</p>
 
-<div id="sidebar">
-  <div id="buttons">
-    <button onclick="salvarPDF()">Salvar PDF</button>
-    <button onclick="limparPercurso()">Limpar</button>
-  </div>
-  <div class="info" id="status">Status: Conectando...</div>
-  <div class="info" id="rua">Rua: ---</div>
-  <div class="info" id="velocidade">Velocidade: --- km/h</div>
-  <hr>
-  <h3>Velocidade maxima por rua</h3>
-  <div id="lista-ruas"></div>
-</div>
+<video id="video" autoplay playsinline></video>
 
-<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<div id="status">🔍 Aguardando...</div>
+<div id="info"></div>
+
 <script>
-  const SERVER_IP = "45.181.56.47";
-  const SERVER_PORT = "80";
-  const AUTH_TOKEN = "lFB0OVz9myOpC5kTOw4nDcnxdjdx-TCY";
-  const PIN = "V3";
-  const MAX_POINTS = 500;
+const video = document.getElementById('video');
+const statusEl = document.getElementById('status');
+const infoEl = document.getElementById('info');
 
-  let map = L.map('map').setView([-23.5505, -46.6333], 17);
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    attribution: '&copy; OpenStreetMap contributors'
-  }).addTo(map);
+/* 🔐 DADOS DO SEU BLYNK */
+const SERVER_IP   = "45.181.56.47";
+const SERVER_PORT = "8080";
+const AUTH_TOKEN  = "lFB0OVz9myOpC5kTOw4nDcnxdjdx-TCY";
 
-  const carIcon = L.icon({
-    iconUrl: 'https://grupoprotegemais.com.br/wp-content/uploads/2025/03/logo.webp',
-    iconSize: [40, 40],
-    iconAnchor: [18, 18]
-  });
+const BLYNK_URL = `http://${SERVER_IP}:${SERVER_PORT}/${AUTH_TOKEN}/update/V5`;
 
-  let marker = L.marker([-23.5505, -46.6333], { icon: carIcon }).addTo(map);
-  let polyline = L.polyline([], { color: 'blue', weight: 4 }).addTo(map);
-  let route = [];
+let estadoAtual = ""; // ligado | desligado
 
-  let lastLat = null;
-  let lastLng = null;
+function enviarBlynk(valor) {
+  fetch(`${BLYNK_URL}?value=${valor}`)
+    .then(() => console.log("Blynk V5 =", valor))
+    .catch(err => console.error("Erro Blynk:", err));
+}
 
-  const statusElement = document.getElementById('status');
-  const ruaElement = document.getElementById('rua');
-  const velocidadeElement = document.getElementById('velocidade');
-  const listaRuas = document.getElementById('lista-ruas');
+const hands = new Hands({
+  locateFile: file =>
+    `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+});
 
-  let maxSpeeds = {};
+hands.setOptions({
+  maxNumHands: 1,
+  modelComplexity: 1,
+  minDetectionConfidence: 0.6,
+  minTrackingConfidence: 0.6
+});
 
-  let follow = true;
-  let lastInteractionTime = Date.now();
-
-  map.on('movestart', () => {
-    follow = false;
-    lastInteractionTime = Date.now();
-  });
-
-  function atualizarLista() {
-    listaRuas.innerHTML = '';
-    for (const rua in maxSpeeds) {
-      const div = document.createElement('div');
-      div.className = 'rua-item';
-      div.innerHTML = `<strong>${rua}</strong><br>Velocidade maxima: ${maxSpeeds[rua].toFixed(1)} km/h`;
-      listaRuas.appendChild(div);
-    }
+hands.onResults(results => {
+  if (!results.multiHandLandmarks || results.multiHandLandmarks.length === 0) {
+    statusEl.innerText = "🔍 Nenhuma mão detectada";
+    infoEl.innerText = "";
+    return;
   }
 
-  async function fetchData() {
-    try {
-      statusElement.textContent = "Status: Carregando...";
-      const response = await fetch(`http://${SERVER_IP}:${SERVER_PORT}/${AUTH_TOKEN}/get/${PIN}`);
-      const data = await response.json();
+  const p = results.multiHandLandmarks[0];
 
-      if (data && data[0]) {
-        let parts = data[0].split(',');
-        if (parts.length >= 4) {
-          let lat = parseFloat(parts[0]);
-          let lng = parseFloat(parts[1]);
-          let rua = parts[2].trim();
-          let velocidade = parseFloat(parts[3]);
+  const dedos = [
+    p[8].y  < p[6].y,   // indicador
+    p[12].y < p[10].y,  // médio
+    p[16].y < p[14].y,  // anelar
+    p[20].y < p[18].y   // mindinho
+  ];
 
-          if (lat === lastLat && lng === lastLng) {
-            statusElement.textContent = "Status: Conectado";
-            return;
-          }
-          lastLat = lat;
-          lastLng = lng;
+  const abertos = dedos.filter(d => d).length;
+  infoEl.innerText = `Dedos abertos: ${abertos}`;
 
-          const newPoint = [lat, lng];
-          route.push(newPoint);
-          if (route.length > MAX_POINTS) route.shift();
-          polyline.setLatLngs(route);
-          marker.setLatLng(newPoint);
-
-          if (follow) {
-            map.setView(newPoint, 17);
-          } else if (Date.now() - lastInteractionTime > 20000) {
-            follow = true;
-            map.setView(newPoint, 17);
-          }
-
-          ruaElement.textContent = `Rua: ${rua || "---"}`;
-          velocidadeElement.textContent = `Velocidade: ${velocidade.toFixed(1)} km/h`;
-
-          if (rua !== "") {
-            if (!maxSpeeds[rua] || velocidade > maxSpeeds[rua]) {
-              maxSpeeds[rua] = velocidade;
-              atualizarLista();
-            }
-          }
-          statusElement.textContent = "Status: Conectado";
-        }
-      }
-    } catch (error) {
-      console.error("Erro ao buscar dados:", error);
-      statusElement.textContent = "Status: Desconectado";
-    }
+  // ✋ MÃO ABERTA → LIGA
+  if (abertos >= 4 && estadoAtual !== "ligado") {
+    estadoAtual = "ligado";
+    statusEl.innerText = "✋ V5 LIGADO";
+    enviarBlynk(1);
   }
 
-  setInterval(fetchData, 1000);
-
-  function salvarPDF() {
-    const { jsPDF } = window.jspdf;
-    const doc = new jsPDF();
-    doc.setFontSize(16);
-    doc.text("Relatorio de velocidade por rua", 10, 20);
-    let y = 30;
-    for (const rua in maxSpeeds) {
-      doc.setFontSize(12);
-      doc.text(`${rua}: ${maxSpeeds[rua].toFixed(1)} km/h`, 10, y);
-      y += 10;
-      if (y > 280) {
-        doc.addPage();
-        y = 20;
-      }
-    }
-    doc.save('relatorio_percurso.pdf');
+  // ✊ MÃO FECHADA → DESLIGA
+  if (abertos <= 1 && estadoAtual !== "desligado") {
+    estadoAtual = "desligado";
+    statusEl.innerText = "✊ V5 DESLIGADO";
+    enviarBlynk(0);
   }
+});
 
-  function limparPercurso() {
-    if (confirm("Tem certeza que deseja limpar o percurso?")) {
-      route = [];
-      polyline.setLatLngs(route);
-      maxSpeeds = {};
-      atualizarLista();
-      ruaElement.textContent = "Rua: ---";
-      velocidadeElement.textContent = "Velocidade: --- km/h";
-    }
-  }
+const camera = new Camera(video, {
+  onFrame: async () => {
+    await hands.send({ image: video });
+  },
+  width: 640,
+  height: 480
+});
+
+camera.start();
 </script>
 
 </body>
 </html>
+      
+
